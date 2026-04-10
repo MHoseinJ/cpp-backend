@@ -8,7 +8,5 @@ int main() {
     HTTPServer server;
     server.Loop();
 
-
-
     return 0;
 }

@@ -6,10 +6,14 @@
 #include <cstring>
 #include <vector>
 #include <string>
+#include <atomic>
+#include <csignal>
 
 #include "Core.h"
 #include "Log.h"
 
+
+std::atomic<bool> closeSignal(false);
 
 HTTPServer::HTTPServer() {
     // create a socket
@@ -54,14 +58,26 @@ HTTPServer::HTTPServer() {
     }
 }
 
-[[noreturn]] void HTTPServer::Loop() const {
-    while (true) {
+void HTTPServer::Loop() const {
+    std::signal(SIGINT, shutdown_server);
+
+    backendLog("Server started. press ctrl+c to exit.", INFO);
+
+    while (!closeSignal) {
+        
+        if (closeSignal) {
+            break;
+        }
         // accept input connections
         struct sockaddr_in client{};
         socklen_t client_len = sizeof(client);
 
-        int client_fd = accept(socket_fd, reinterpret_cast<sockaddr *>(&client), &client_len);
+        int client_fd = accept4(socket_fd, reinterpret_cast<sockaddr *>(&client), &client_len, SOCK_NONBLOCK); // TODO: fix late response to exit
         if (client_fd < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                backendLog("Client disconnected.", INFO);
+                sleep(1);
+            }
             perror("accept");
             continue;
         }
@@ -75,7 +91,7 @@ HTTPServer::HTTPServer() {
         backendLog("Client connected: " + std::to_string(socket_fd), INFO);
 
         std::vector<char> buffer(1024);
-        ssize_t bytes_recived = read(client_fd, buffer.data(), buffer.size() - 1);
+        const ssize_t bytes_recived = read(client_fd, buffer.data(), buffer.size() - 1);
         if (bytes_recived == 0) {
             backendLog("Client disconnected", INFO);
             close(client_fd);
@@ -115,7 +131,7 @@ HTTPServer::HTTPServer() {
         close(client_fd);
         backendLog("Closing client", INFO);
     }
-
+    backendLog("reached here", INFO);
 }
 
 HTTPServer::~HTTPServer() {
@@ -134,5 +150,12 @@ void send_string(int sockfd, const std::string& message) {
         perror("write");
     } else if (bytes_sent != message.length()) {
         backendLog("Not all bytes sent!", WARNING);
+    }
+}
+
+void shutdown_server(const int signal) {
+    if (signal == SIGINT) {
+        closeSignal = true;
+        backendLog("Closing server", INFO);
     }
 }
