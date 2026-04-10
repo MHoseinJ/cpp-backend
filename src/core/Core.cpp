@@ -76,7 +76,6 @@ void HTTPServer::Loop() const {
         if (client_fd < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 backendLog("Client disconnected.", INFO);
-                sleep(1);
             }
             perror("accept");
             continue;
