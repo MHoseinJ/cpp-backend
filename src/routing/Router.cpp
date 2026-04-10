@@ -71,15 +71,18 @@ std::optional<std::unordered_map<std::string, std::string>> Route::match(
     HTTPMethod requestMethod
 ) const {
 
+    // checks if this route supports requested method or not
     if (!methods.contains(requestMethod)) {
         return std::nullopt;
     }
 
-    auto request_segments = parse_path(requestPath);
+    // checks if requested path is valid or not
+    const auto request_segments = parse_path(requestPath);
     if (request_segments.empty()) {
         return std::nullopt;
     }
 
+    // compares the length of requested path segments and parsed path
     if (request_segments.size() != parsed_path.size()) {
         return std::nullopt;
     }
@@ -89,12 +92,14 @@ std::optional<std::unordered_map<std::string, std::string>> Route::match(
         const PathSegment &req_segment = request_segments[i];
         const PathSegment &parsed_segment = parsed_path[i];
 
+        // if parsed segment is static so the value should be the same
         if (!parsed_segment.is_dynamic) {
 
             if (parsed_segment.value != req_segment.value) {
                 return std::nullopt;
             }
 
+        // else it's okay
         } else {
             parameters[parsed_segment.value] = req_segment.value;
         }
@@ -320,9 +325,13 @@ Route* Router::find_route(
     std::unordered_map<std::string, std::string>& out_params)
 {
     for (const auto& rt : static_routes) {
-        if (rt->methods.count(requestMethod)) {
+
+        // if the requested method supported by the route then
+        if (rt->methods.contains(requestMethod)) {
+            // if requested segment matches parsed segment then we have a key value map
             auto params_opt = rt->match(requestPath, requestMethod);
             if (params_opt) {
+                // now we have a ready to send for lua route
                 out_params = std::move(params_opt.value());
                 return rt.get();
             }
@@ -330,9 +339,12 @@ Route* Router::find_route(
     }
 
     for (const auto& rt : dynamic_routes) {
-         if (rt->methods.count(requestMethod)) {
+        // if the requested method supported by the route then
+         if (rt->methods.contains(requestMethod)) {
+             // if requested segment matches parsed segment then we have a key value map
             auto params_opt = rt->match(requestPath, requestMethod);
             if (params_opt) {
+                // now we have a ready to send for lua route
                 out_params = std::move(params_opt.value());
                 return rt.get();
             }
