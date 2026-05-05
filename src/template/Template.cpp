@@ -18,8 +18,8 @@ optional<njson> TemplateEngine::getNestedJson(const njson& json, const string& p
 
     while (std::getline(ss, segment, '.')) {
 
-        while (!segment.empty() && segment[0] == ' ') segment.erase(0, 1);
-        while (!segment.empty() && segment.back() == ' ') segment.pop_back();
+        while (!segment.empty() && (segment[0] == ' ' || segment[0] == '\t')) segment.erase(0, 1);
+        while (!segment.empty() && (segment.back() == ' ' || segment.back() == '\t')) segment.pop_back();
 
         if (!current_data.is_object() || !current_data.contains(segment)) {
             return std::nullopt;
@@ -66,7 +66,7 @@ njson TemplateEngine::processNode(const njson& node, const njson& data) {
     }
 
     if (node.is_string()) {
-        std::string str = node.get<std::string>();
+        auto str = node.get<std::string>();
         std::regex pattern(R"(\{\{\s*([^{}]+?)\s*\}\})");
         std::smatch match;
         std::string result = str;
@@ -79,14 +79,13 @@ njson TemplateEngine::processNode(const njson& node, const njson& data) {
 
             if (auto valueOpt = getNestedJson(data, path); valueOpt.has_value()) {
                 std::string replacement = jsonToString(valueOpt.value());
-                size_t pos = result.find(fullMatch);
-                if (pos != std::string::npos) {
+                if (size_t pos = result.find(fullMatch); pos != std::string::npos) {
                     result.replace(pos, fullMatch.length(), replacement);
                 }
             }
             ++it;
         }
-        return {result};
+        return result;
     }
 
     return node;
