@@ -1,7 +1,7 @@
 # CPP WEB SERVER PROJECT
---
+
 this project is a really lightweight web server that can also handle some basic logics like routing and scripting and etc
-___
+
 ## installation
 ```shell
 # install lua (archlinux)
@@ -33,5 +33,5 @@ you are good to go! just run the engine!
 
 # Usage
 unfortunately still there is no documentation except reading the source, but I'll add it later!
-___
+
 # special thanks to [ThePhD](https://github.com/ThePhD) and [nlohmann](https://github.com/nlohmann)
