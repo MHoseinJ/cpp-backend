@@ -6,7 +6,7 @@
 
 #include "json.hpp"
 
-using json = nlohmann::json;
+using njson = nlohmann::json;
 
 namespace fs {
 
@@ -50,7 +50,7 @@ namespace fs {
         return true;
     }
 
-    json readJson(const std::string& path) {
+    njson readJson(const std::string& path) {
         std::ifstream file(path);
 
         if (!file) {
@@ -58,7 +58,7 @@ namespace fs {
             return {};
         }
 
-        json data;
+        njson data;
         try {
             file >> data;
         }
@@ -70,7 +70,7 @@ namespace fs {
         return data;
     }
 
-    bool writeJson(const std::string& path, const json& data) {
+    bool writeJson(const std::string& path, const njson& data) {
         std::ofstream file(path);
 
         if (!file) {
