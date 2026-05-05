@@ -12,35 +12,77 @@ std::vector<PathSegment> parse_path(const std::string& path) {
     std::vector<PathSegment> path_segments;
     std::string normalized_path = path;
 
-    // handle trail slash
-    if (normalized_path.length() > 1 && normalized_path.back() == '/') {
-        normalized_path.pop_back();
-    } else if (normalized_path.empty()) {
-        return path_segments;
+    // Handle root path explicitly
+    if (normalized_path == "/") {
+        // Represent root path as a single, potentially empty, segment or handle specially.
+        // For simplicity here, let's ensure it doesn't result in an empty vector if it's the only thing.
+        // We can add a dummy segment or adjust logic downstream.
+        // A common approach is to treat "/" as having one segment, which is empty.
+        // Let's adjust the loop logic slightly or add an explicit segment.
+
+        // Alternative: If the goal is that "/" should match "/", the parsing needs to yield a comparable structure.
+        // For now, let's focus on NOT returning empty for "/"
     }
 
+    // handle trail slash (only if it's not the only character)
+    if (normalized_path.length() > 1 && normalized_path.back() == '/') {
+        normalized_path.pop_back();
+    }
+
+    // If after normalization, the path is empty (e.g. original path was ""), return empty.
+    // Or if it was just "/", and we decided not to normalize it further.
+    // Let's reconsider the loop based on the "/" case.
 
     std::stringstream ss(normalized_path);
     std::string segment_str;
+    bool first_segment = true; // Flag to handle the leading slash correctly
 
     while (std::getline(ss, segment_str, '/')) {
+        // The first segment might be empty if the path starts with '/'
+        // If the original path was "/", getline might yield "" first.
         if (segment_str.empty()) {
-            continue;
-        }
+            // If it's the root path "/", the first segment read will be empty.
+            // If it's like "//path", the first empty segment should be skipped.
+            // If it's "/path/", the last empty segment should be skipped if trailing slash removed.
+            // The current `continue` is generally correct for skipping truly empty segments like in "//".
+            // But for the root "/" case, we need to ensure something is represented.
 
-        PathSegment segment;
-        if (segment_str[0] == ':') {
-            segment.is_dynamic = true;
-            segment.value = segment_str.substr(1); // remove ':'
-            if (segment.value.empty()) {
-                // illegal thing
-                backendLog("illegal format used: " + path, ERROR);
+            // If the original path was exactly "/", and this is the first (and only) segment read:
+            if (path == "/" && first_segment) {
+                 // We can either add an empty PathSegment here, or ensure the logic handles this.
+                 // Let's try adding an empty segment to represent the root.
+                 PathSegment segment;
+                 segment.is_dynamic = false;
+                 segment.value = ""; // Explicitly empty for root
+                 path_segments.push_back(std::move(segment));
+                 // No continue here, as we've handled the root segment.
+            } else {
+                // Skip empty segments that result from "//" or trailing slashes (if not handled above)
                 continue;
             }
         } else {
-            segment.is_dynamic = false;
-            segment.value = segment_str;
+            PathSegment segment;
+            if (segment_str[0] == ':') {
+                segment.is_dynamic = true;
+                segment.value = segment_str.substr(1); // remove ':'
+                if (segment.value.empty()) {
+                    // illegal thing
+                    backendLog("illegal format used: " + path, ERROR);
+                    continue;
+                }
+            } else {
+                segment.is_dynamic = false;
+                segment.value = segment_str;
+            }
+            path_segments.push_back(std::move(segment));
         }
+        first_segment = false; // after processing the first potential segment
+    }
+
+    if (path_segments.empty() && path == "/") {
+        PathSegment segment;
+        segment.is_dynamic = false;
+        segment.value = ""; // represent root
         path_segments.push_back(std::move(segment));
     }
 
@@ -108,53 +150,6 @@ std::optional<std::unordered_map<std::string, std::string>> Route::match(
     return parameters;
 }
 
-
-// Router::Router() {
-//     try {
-//         const auto routes_json = fs::readJson("routes.json");
-//         if (!routes_json.is_array()) {
-//             backendLog("could not read routes.json: json should be array", ERROR);
-//             exit(1);
-//         }
-//         for (auto route : routes_json) {
-//             add_route_with_json(route);
-//         }
-//
-//         bool not_found_exists = false;
-//         for(const auto& rt : static_routes) {
-//             if (rt->original_path == not_found_route_path) {
-//                 not_found_route_ptr = rt.get();
-//                 not_found_exists = true;
-//                 break;
-//             }
-//         }
-//         if (!not_found_exists) {
-//             Route not_found_route(
-//                 "page-not-found",
-//                 not_found_route_path,
-//                 "handle",
-//                 {DELETE, POST, GET, PUT},
-//                 {"middle"},
-//                 ADMIN
-//             );
-//             add_route(std::move(not_found_route));
-//             for(const auto& rt : static_routes) {
-//                 if (rt->original_path == not_found_route_path) {
-//                     not_found_route_ptr = rt.get();
-//                     break;
-//                 }
-//             }
-//             if (!not_found_route_ptr) {
-//                 // Critical error if still not found
-//                 backendLog("failed to set not_found_route_ptr!", ERROR);
-//             }
-//         }
-//
-//     } catch (const std::exception &e) {
-//         backendLog("error while parsing routes.json: " + std::string(e.what()), ERROR);
-//     }
-// }
-
 Router::Router() {
     try {
         auto routes_json = fs::readJson("routes.json");
@@ -208,7 +203,7 @@ HTTPMethod string_to_http_method(const std::string& method_str) {
     if (method_str == "POST") return HTTPMethod::POST;
     if (method_str == "DELETE") return HTTPMethod::DELETE;
     if (method_str == "PUT") return HTTPMethod::PUT;
-    return HTTPMethod::GET;
+    return HTTPMethod::UNKNOWN;
 }
 
 AccessLevel string_to_access_level(const std::string& level_str) {
@@ -274,7 +269,7 @@ void Router::add_route(Route route) {
 
     std::string name = route.name;
 
-    if (routes_by_name.count(route.name)) {
+    if (routes_by_name.contains(route.name)) {
         backendLog("duplicated route with name: " + route.name, ERROR);
         return;
     }
@@ -285,8 +280,8 @@ void Router::add_route(Route route) {
     routes_by_name[name] = raw_ptr;
 
     bool has_dynamic = false;
-    for (const auto& segment : raw_ptr->parsed_path) {
-        if (segment.is_dynamic) {
+    for (const auto&[value, is_dynamic] : raw_ptr->parsed_path) {
+        if (is_dynamic) {
             has_dynamic = true;
             break;
         }
@@ -321,13 +316,17 @@ void Router::add_route(Route route) {
 
 Route* Router::find_route(
     const std::string& requestPath,
-    HTTPMethod requestMethod,
+    const HTTPMethod requestMethod,
     std::unordered_map<std::string, std::string>& out_params)
 {
+    backendLog("request path: '" + requestPath + "'", WARNING);
     for (const auto& rt : static_routes) {
+
+        backendLog("STATIC routes: " + rt->name + " path: '" + rt->original_path + "'", WARNING);
 
         // if the requested method supported by the route then
         if (rt->methods.contains(requestMethod)) {
+            backendLog("contains 332", PRINT);
             // if requested segment matches parsed segment then we have a key value map
             auto params_opt = rt->match(requestPath, requestMethod);
             if (params_opt) {
@@ -339,8 +338,12 @@ Route* Router::find_route(
     }
 
     for (const auto& rt : dynamic_routes) {
+
+        backendLog("DYNAMIC routes: " + rt->name + " path: '" + rt->original_path + "'", WARNING);
+
         // if the requested method supported by the route then
          if (rt->methods.contains(requestMethod)) {
+             backendLog("contains dynamic 346", PRINT);
              // if requested segment matches parsed segment then we have a key value map
             auto params_opt = rt->match(requestPath, requestMethod);
             if (params_opt) {

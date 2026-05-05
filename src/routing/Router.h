@@ -14,7 +14,8 @@ enum HTTPMethod {
     GET,
     POST,
     DELETE,
-    PUT
+    PUT,
+    UNKNOWN
 };
 
 enum AccessLevel {
