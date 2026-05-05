@@ -5,6 +5,8 @@
 extern sol::state lua;
 extern std::vector<LuaObject> scripts;
 
+void BindToLua(sol::state& lua);
+
 class Lua {
 public:
 
@@ -15,7 +17,10 @@ public:
 
     void Initialize();
     void LoadScripts();
+    sol::function GetFunction(const std::string& name);
 
 private:
     sol::state lua;
 };
+
+std::vector<std::string> split(const std::string& s, char delimiter);
