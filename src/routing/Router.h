@@ -65,7 +65,7 @@ public:
         const std::string& requestPath,
         HTTPMethod requestMethod,
         std::unordered_map<std::string, std::string>& out_params
-    );
+    ) const;
 
     void add_route(Route route);
 

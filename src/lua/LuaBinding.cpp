@@ -73,7 +73,7 @@ sol::function Lua::GetFunction(const std::string &name) {
     }
 
     backendLog("No such script: " + name, ERROR);
-    return nullptr;
+    return {};
 }
 
 std::vector<std::string> split(const std::string &s, const char delimiter) {
@@ -113,11 +113,11 @@ void BindToLua(sol::state &lua) {
     lua["template"] = lua.create_table();
 
     lua["template"]["render"] = [](const njson& tmpl, const njson& data) {
-        return TemplateEngine::getEngine().render_WITH_JSON_TMPL(tmpl, data);
+        return TemplateEngine::render_WITH_JSON_TMPL(tmpl, data);
     };
 
     lua["template"]["renderJson"] = [](const std::string& tmpl, const njson& data) {
-        return TemplateEngine::getEngine().renderToJson(tmpl, data);
+        return TemplateEngine::renderToJson(tmpl, data);
     };
 
     lua["template"]["get"] = [&lua](const njson& data, const std::string& path) -> sol::object {

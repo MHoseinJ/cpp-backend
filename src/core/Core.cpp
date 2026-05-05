@@ -24,8 +24,7 @@ void shutdown_server(const int signal) {
 }
 
 void send_string(int sockfd, const std::string& message) {
-    ssize_t bytes_sent = write(sockfd, message.c_str(), message.length());
-    if (bytes_sent < 0) {
+    if (const ssize_t bytes_sent = write(sockfd, message.c_str(), message.length()); bytes_sent < 0) {
         perror("write");
     } else if (bytes_sent != static_cast<ssize_t>(message.length())) {
         backendLog("Not all bytes sent!", WARNING);
@@ -58,15 +57,14 @@ HTTPServer::HTTPServer() {
     }
     backendLog("Socket bound: " + std::to_string(socket_fd), INFO);
 
-    int wait_line_count = 5;
-    if (listen(socket_fd, wait_line_count) < 0) {
+    if (int wait_line_count = 5; listen(socket_fd, wait_line_count) < 0) {
         perror("listen");
         close(socket_fd);
         exit(1);
     }
 }
 
-void HTTPServer::Loop(Router* router) const {
+void HTTPServer::Loop(const Router* router) const {
     std::signal(SIGINT, shutdown_server);
     std::signal(SIGTERM, shutdown_server);
 
@@ -81,7 +79,7 @@ void HTTPServer::Loop(Router* router) const {
         timeout.tv_sec = 1;
         timeout.tv_usec = 0;
 
-        int activity = select(socket_fd + 1, &read_fds, nullptr, nullptr, &timeout);
+        const int activity = select(socket_fd + 1, &read_fds, nullptr, nullptr, &timeout);
 
         if (activity < 0) {
             if (closeSignal) break;
@@ -95,7 +93,7 @@ void HTTPServer::Loop(Router* router) const {
 
         sockaddr_in client{};
         socklen_t client_len = sizeof(client);
-        int client_fd = accept(socket_fd, reinterpret_cast<sockaddr *>(&client), &client_len);
+        const int client_fd = accept(socket_fd, reinterpret_cast<sockaddr *>(&client), &client_len);
 
         if (client_fd < 0) {
             perror("accept");
@@ -108,7 +106,7 @@ void HTTPServer::Loop(Router* router) const {
         backendLog("Client connecting: " + std::string(client_ip) + ":" + std::to_string(client_port), INFO);
 
         std::vector<char> buffer(4096);
-        ssize_t bytes_received = read(client_fd, buffer.data(), buffer.size() - 1);
+        const ssize_t bytes_received = read(client_fd, buffer.data(), buffer.size() - 1);
 
         if (bytes_received <= 0) {
             if (bytes_received < 0) {
@@ -125,66 +123,24 @@ void HTTPServer::Loop(Router* router) const {
         backendLog("Request: " + request_str, PRINT);
 
         std::string http_response;
-        // if (request_str.rfind("GET / ", 0) == 0 || request_str.rfind("GET /", 0) == 0) {
-        //     http_response = "HTTP/1.1 200 OK\r\n";
-        //     http_response += "Content-Type: text/html; charset=utf-8\r\n";
-        //     http_response += "Connection: close\r\n";
-        //     http_response += "Content-Length: 89\r\n";
-        //     http_response += "\r\n";
-        //     http_response += "<html><head><meta charset=\"UTF-8\"></head><body>";
-        //     http_response += "<h1>HELLO!</h1>";
-        //     http_response += "<p>it's just a simple response</p>";
-        //     http_response += "</body></html>";
-        // } else {
-        //     http_response = "HTTP/1.1 404 Not Found\r\n";
-        //     http_response += "Content-Type: text/html; charset=utf-8\r\n";
-        //     http_response += "Connection: close\r\n";
-        //     http_response += "Content-Length: 63\r\n";
-        //     http_response += "\r\n";
-        //     http_response += "<html><head><meta charset=\"UTF-8\"></head><body><h1>no page found</h1></body></html>";
-        // }
-        //
-        // HTTPMethod method;
-        // std::string path;
-        // std::unordered_map<std::string, std::string> parameters;
-        //
-        // parse_http_request(request_str, method, path, parameters, nullptr);
-        //
-        // const auto route = router->find_route(path, method, parameters);
-        //
-        // if (route) {
-        //     backendLog("Route found: " + route->name + ", handler script:" + route->handlerScript, WARNING);
-        //     auto function = Lua::getInstance().GetFunction(route->handlerScript);
-        //     sol::protected_function result = function();
-        //     result();
-        //
-        // }
 
         HTTPRequest request(request_str);
 
-        const auto route = router->find_route(request.raw_url, request.method, request.path_parameters);
+        if (const auto route = router->find_route(request.raw_url, request.method, request.path_parameters)) {
 
-        if (route) {
-            // for (auto& script : scripts) {
-            //     if (!script.update.valid() || script.update.get_type() != sol::type::function)
-            //         continue;
-            //
-            //     sol::protected_function pf = script.update;
-            //     sol::set_environment(script.env, pf);
-            //     sol::protected_function_result result = pf(dt);
-            //     if (!result.valid()) {
-            //         sol::error err = result;
-            //         gameLog("[LUA] error: " + std::string(err.what()), ERROR);
-            //     }
-            // }
-            backendLog("Route found: " + request.raw_url, INFO);
-            const sol::function function = Lua::getInstance().GetFunction(route->handlerScript);
-            const sol::protected_function& pf = function;
-            sol::protected_function_result result = pf(request);
-            if (!result.valid()) {
-                sol::error err = result;
-                backendLog("[LUA] error: " + std::string(err.what()), ERROR);
+            backendLog("Route found: " + route->original_path, INFO);
+            const sol::function function = Lua::GetFunction(route->handlerScript);
+            if (function != sol::nil) {
+                const sol::protected_function& pf = function;
+                sol::protected_function_result result = pf(request);
+                if (!result.valid()) {
+                    sol::error err = result;
+                    backendLog("[LUA] error: " + std::string(err.what()), ERROR);
+                    continue;
+                }
+                http_response = result;
             }
+
         }
 
         send_string(client_fd, http_response);

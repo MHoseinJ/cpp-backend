@@ -18,7 +18,7 @@ std::string HTTPRequest::get_path_parameters(const std::string& key) {
 }
 
 std::string HTTPRequest::get_query_parameters(const std::string &key) {
-    auto it = query_parameters.find(key);
+    const auto it = query_parameters.find(key);
     if (it == query_parameters.end()) {
         backendLog("there is no object with the key: " + key, ERROR);
         return "";

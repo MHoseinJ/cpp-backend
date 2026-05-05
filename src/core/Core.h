@@ -14,7 +14,7 @@ private:
     struct sockaddr_in address{};
 public:
     HTTPServer();
-    void Loop(Router* router) const;
+    void Loop(const Router* router) const;
     ~HTTPServer();
 };
 

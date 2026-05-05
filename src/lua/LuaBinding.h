@@ -17,7 +17,8 @@ public:
 
     void Initialize();
     void LoadScripts();
-    sol::function GetFunction(const std::string& name);
+
+    static sol::function GetFunction(const std::string& name);
 
 private:
     sol::state lua;

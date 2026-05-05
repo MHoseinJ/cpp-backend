@@ -110,7 +110,7 @@ Route::Route(
 
 std::optional<std::unordered_map<std::string, std::string>> Route::match(
     const std::string &requestPath,
-    HTTPMethod requestMethod
+    const HTTPMethod requestMethod
 ) const {
 
     // checks if this route supports requested method or not
@@ -174,7 +174,7 @@ Router::Router() {
             Route not_found_route(
                 "page-not-found",
                 not_found_route_path,
-                "handle",
+                "test.not_found_handler",
                 {DELETE, POST, GET, PUT},
                 {"middle"},
                 ADMIN
@@ -300,7 +300,7 @@ void Router::add_route(Route route) {
     for (const auto& route : dynamic_routes) {
         std::string test;
         for (const auto& method : route->methods) {
-            test += method;
+            test += std::to_string(method);
         }
         backendLog(route->name + " " + std::to_string(route->accessLevel) + " " + test, PRINT);
     }
@@ -308,7 +308,7 @@ void Router::add_route(Route route) {
     for (const auto& route : static_routes) {
         std::string test;
         for (const auto& method : route->methods) {
-            test += method;
+            test += std::to_string(method);
         }
         backendLog(route->name + " " + std::to_string(route->accessLevel) + " " + test, PRINT);
     }
@@ -317,8 +317,7 @@ void Router::add_route(Route route) {
 Route* Router::find_route(
     const std::string& requestPath,
     const HTTPMethod requestMethod,
-    std::unordered_map<std::string, std::string>& out_params)
-{
+    std::unordered_map<std::string, std::string>& out_params) const {
     backendLog("request path: '" + requestPath + "'", WARNING);
     for (const auto& rt : static_routes) {
 
@@ -328,8 +327,7 @@ Route* Router::find_route(
         if (rt->methods.contains(requestMethod)) {
             backendLog("contains 332", PRINT);
             // if requested segment matches parsed segment then we have a key value map
-            auto params_opt = rt->match(requestPath, requestMethod);
-            if (params_opt) {
+            if (auto params_opt = rt->match(requestPath, requestMethod)) {
                 // now we have a ready to send for lua route
                 out_params = std::move(params_opt.value());
                 return rt.get();
@@ -345,8 +343,7 @@ Route* Router::find_route(
          if (rt->methods.contains(requestMethod)) {
              backendLog("contains dynamic 346", PRINT);
              // if requested segment matches parsed segment then we have a key value map
-            auto params_opt = rt->match(requestPath, requestMethod);
-            if (params_opt) {
+             if (auto params_opt = rt->match(requestPath, requestMethod)) {
                 // now we have a ready to send for lua route
                 out_params = std::move(params_opt.value());
                 return rt.get();
@@ -355,8 +352,7 @@ Route* Router::find_route(
     }
 
     if (not_found_route_ptr) {
-        auto params_opt = not_found_route_ptr->match(requestPath, requestMethod);
-        if (params_opt) {
+        if (auto params_opt = not_found_route_ptr->match(requestPath, requestMethod)) {
              out_params = std::move(params_opt.value());
              return not_found_route_ptr;
         } else {
