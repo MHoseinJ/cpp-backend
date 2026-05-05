@@ -16,6 +16,10 @@ add_executable(backend
         src/lua/LuaBinding.cpp
         src/lua/LuaBinding.h
         src/lua/LuaObject.h
+        src/core/HTTPObject.cpp
+        src/core/HTTPObject.h
+        src/template/Template.cpp
+        src/template/Template.h
 )
 
 find_package(Lua REQUIRED)
