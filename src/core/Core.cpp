@@ -8,21 +8,36 @@
 #include <string>
 #include <atomic>
 #include <csignal>
-
+#include <sys/select.h>
 #include "Core.h"
-#include "Log.h"
 
+#include "HTTPObject.h"
+#include "Log.h"
+#include "../lua/LuaBinding.h"
 
 std::atomic<bool> closeSignal(false);
 
+void shutdown_server(const int signal) {
+    if (signal == SIGINT || signal == SIGTERM) {
+        closeSignal = true;
+    }
+}
+
+void send_string(int sockfd, const std::string& message) {
+    ssize_t bytes_sent = write(sockfd, message.c_str(), message.length());
+    if (bytes_sent < 0) {
+        perror("write");
+    } else if (bytes_sent != static_cast<ssize_t>(message.length())) {
+        backendLog("Not all bytes sent!", WARNING);
+    }
+}
+
 HTTPServer::HTTPServer() {
-    // create a socket
     socket_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (socket_fd < 0) {
         perror("socket");
         exit(1);
     }
-
     backendLog("Socket created: " + std::to_string(socket_fd), INFO);
 
     constexpr int optval = 1;
@@ -32,15 +47,9 @@ HTTPServer::HTTPServer() {
         exit(1);
     }
 
-    // fill with zero
     memset(&address, 0, sizeof(address));
-
-    // set to ipv4
     address.sin_family = AF_INET;
-    // allow all interfaces
     address.sin_addr.s_addr = INADDR_ANY;
-
-    // set port to 8000
     address.sin_port = htons(8000);
 
     if (bind(socket_fd, reinterpret_cast<sockaddr *>(&address), sizeof(address)) < 0) {
@@ -49,7 +58,6 @@ HTTPServer::HTTPServer() {
     }
     backendLog("Socket bound: " + std::to_string(socket_fd), INFO);
 
-    // listening for connections
     int wait_line_count = 5;
     if (listen(socket_fd, wait_line_count) < 0) {
         perror("listen");
@@ -58,103 +66,243 @@ HTTPServer::HTTPServer() {
     }
 }
 
-void HTTPServer::Loop() const {
+void HTTPServer::Loop(Router* router) const {
     std::signal(SIGINT, shutdown_server);
+    std::signal(SIGTERM, shutdown_server);
 
     backendLog("Server started. press ctrl+c to exit.", INFO);
 
     while (!closeSignal) {
-        
-        if (closeSignal) {
-            break;
-        }
-        // accept input connections
-        struct sockaddr_in client{};
-        socklen_t client_len = sizeof(client);
+        fd_set read_fds;
+        FD_ZERO(&read_fds);
+        FD_SET(socket_fd, &read_fds);
 
-        int client_fd = accept4(socket_fd, reinterpret_cast<sockaddr *>(&client), &client_len, SOCK_NONBLOCK); // TODO: fix late response to exit
+        struct timeval timeout{};
+        timeout.tv_sec = 1;
+        timeout.tv_usec = 0;
+
+        int activity = select(socket_fd + 1, &read_fds, nullptr, nullptr, &timeout);
+
+        if (activity < 0) {
+            if (closeSignal) break;
+            perror("select");
+            continue;
+        }
+
+        if (activity == 0) {
+            continue;
+        }
+
+        sockaddr_in client{};
+        socklen_t client_len = sizeof(client);
+        int client_fd = accept(socket_fd, reinterpret_cast<sockaddr *>(&client), &client_len);
+
         if (client_fd < 0) {
-            if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                backendLog("Client disconnected.", INFO);
-            }
             perror("accept");
             continue;
         }
 
         char client_ip[INET_ADDRSTRLEN];
         inet_ntop(AF_INET, &client.sin_addr.s_addr, client_ip, INET_ADDRSTRLEN);
-
         const uint16_t client_port = ntohs(client.sin_port);
-
         backendLog("Client connecting: " + std::string(client_ip) + ":" + std::to_string(client_port), INFO);
-        backendLog("Client connected: " + std::to_string(socket_fd), INFO);
 
-        std::vector<char> buffer(1024);
-        const ssize_t bytes_recived = read(client_fd, buffer.data(), buffer.size() - 1);
-        if (bytes_recived == 0) {
-            backendLog("Client disconnected", INFO);
-            close(client_fd);
-            continue;
-        } else if (bytes_recived < 0) {
-            perror("read");
+        std::vector<char> buffer(4096);
+        ssize_t bytes_received = read(client_fd, buffer.data(), buffer.size() - 1);
+
+        if (bytes_received <= 0) {
+            if (bytes_received < 0) {
+                perror("read");
+            } else {
+                backendLog("Client disconnected", INFO);
+            }
             close(client_fd);
             continue;
         }
 
-        buffer[bytes_recived] = '\0';
-
-        std::string request_str = std::string(buffer.begin(), buffer.begin() + bytes_recived);
+        buffer[bytes_received] = '\0';
+        std::string request_str(buffer.begin(), buffer.begin() + bytes_received);
         backendLog("Request: " + request_str, PRINT);
 
         std::string http_response;
+        // if (request_str.rfind("GET / ", 0) == 0 || request_str.rfind("GET /", 0) == 0) {
+        //     http_response = "HTTP/1.1 200 OK\r\n";
+        //     http_response += "Content-Type: text/html; charset=utf-8\r\n";
+        //     http_response += "Connection: close\r\n";
+        //     http_response += "Content-Length: 89\r\n";
+        //     http_response += "\r\n";
+        //     http_response += "<html><head><meta charset=\"UTF-8\"></head><body>";
+        //     http_response += "<h1>HELLO!</h1>";
+        //     http_response += "<p>it's just a simple response</p>";
+        //     http_response += "</body></html>";
+        // } else {
+        //     http_response = "HTTP/1.1 404 Not Found\r\n";
+        //     http_response += "Content-Type: text/html; charset=utf-8\r\n";
+        //     http_response += "Connection: close\r\n";
+        //     http_response += "Content-Length: 63\r\n";
+        //     http_response += "\r\n";
+        //     http_response += "<html><head><meta charset=\"UTF-8\"></head><body><h1>no page found</h1></body></html>";
+        // }
+        //
+        // HTTPMethod method;
+        // std::string path;
+        // std::unordered_map<std::string, std::string> parameters;
+        //
+        // parse_http_request(request_str, method, path, parameters, nullptr);
+        //
+        // const auto route = router->find_route(path, method, parameters);
+        //
+        // if (route) {
+        //     backendLog("Route found: " + route->name + ", handler script:" + route->handlerScript, WARNING);
+        //     auto function = Lua::getInstance().GetFunction(route->handlerScript);
+        //     sol::protected_function result = function();
+        //     result();
+        //
+        // }
 
-        if (request_str.rfind("GET / ", 0) == 0) {
-            http_response = "HTTP/1.1 200 OK\r\n";
-            http_response += "Content-Type: text/html; charset=utf-8\r\n";
-            http_response += "Connection: close\r\n";
-            http_response += "\r\n";
-            http_response += "<html><head><meta charset=\"UTF-8\"></head><body>";
-            http_response += "<h1>HELLO!</h1>";
-            http_response += "<p>it's just a simple response</p>";
-            http_response += "</body></html>";
-        } else {
-            http_response = "HTTP/1.1 404 Not Found\r\n";
-            http_response += "Content-Type: text/html; charset=utf-8\r\n";
-            http_response += "Connection: close\r\n";
-            http_response += "\r\n";
-            http_response += "<html><head><meta charset=\"UTF-8\"></head><body><h1>no page found</h1></body></html>";
+        HTTPRequest request(request_str);
+
+        const auto route = router->find_route(request.raw_url, request.method, request.path_parameters);
+
+        if (route) {
+            // for (auto& script : scripts) {
+            //     if (!script.update.valid() || script.update.get_type() != sol::type::function)
+            //         continue;
+            //
+            //     sol::protected_function pf = script.update;
+            //     sol::set_environment(script.env, pf);
+            //     sol::protected_function_result result = pf(dt);
+            //     if (!result.valid()) {
+            //         sol::error err = result;
+            //         gameLog("[LUA] error: " + std::string(err.what()), ERROR);
+            //     }
+            // }
+            backendLog("Route found: " + request.raw_url, INFO);
+            const sol::function function = Lua::getInstance().GetFunction(route->handlerScript);
+            const sol::protected_function& pf = function;
+            sol::protected_function_result result = pf(request);
+            if (!result.valid()) {
+                sol::error err = result;
+                backendLog("[LUA] error: " + std::string(err.what()), ERROR);
+            }
         }
 
         send_string(client_fd, http_response);
-
         close(client_fd);
-        backendLog("Closing client", INFO);
+        backendLog("Client served and closed", INFO);
     }
-    backendLog("reached here", INFO);
+
+    backendLog("Server shutting down", INFO);
 }
 
 HTTPServer::~HTTPServer() {
-
-    // close the socket
     close(socket_fd);
-
     backendLog("Socket closed: " + std::to_string(socket_fd), INFO);
 }
 
-// helper
+bool parse_http_request(
+    const std::string &raw_request,
+    HTTPMethod &out_method,
+    std::string &out_path,
+    std::unordered_map<std::string, std::string> &out_params,
+    const char *out_body
+) {
+    out_method = HTTPMethod::UNKNOWN;
+    out_path = "";
+    out_params.clear();
 
-void send_string(int sockfd, const std::string& message) {
-    ssize_t bytes_sent = write(sockfd, message.c_str(), message.length());
-    if (bytes_sent < 0) {
-        perror("write");
-    } else if (bytes_sent != message.length()) {
-        backendLog("Not all bytes sent!", WARNING);
+    size_t first_line_end = raw_request.find("\r\n");
+    if (first_line_end == std::string::npos) {
+        return false;
     }
+    std::string request_line = raw_request.substr(0, first_line_end);
+
+    std::stringstream ss_line(request_line);
+    std::string method_str, path_with_query, http_version;
+
+    if (!(ss_line >> method_str >> path_with_query >> http_version)) {
+        return false;
+    }
+
+    out_method = string_to_http_method(method_str);
+    if (out_method == HTTPMethod::UNKNOWN) {
+        return false;
+    }
+
+    size_t query_pos = path_with_query.find('?');
+    if (query_pos == std::string::npos) {
+        out_path = url_decode(path_with_query);
+    } else {
+        std::string path_part = path_with_query.substr(0, query_pos);
+        std::string query_string = path_with_query.substr(query_pos + 1);
+
+        out_path = url_decode(path_part);
+
+        std::stringstream query_ss(query_string);
+        std::string param_pair;
+
+        while (std::getline(query_ss, param_pair, '&')) {
+            if (param_pair.empty()) continue;
+
+            size_t eq_pos = param_pair.find('=');
+            if (eq_pos == std::string::npos) {
+                std::string key = url_decode(param_pair);
+                out_params[key] = "";
+            } else {
+                std::string key = param_pair.substr(0, eq_pos);
+                std::string value = param_pair.substr(eq_pos + 1);
+
+                out_params[url_decode(key)] = url_decode(value);
+            }
+        }
+    }
+
+    // find the end of request (double CRLF)
+    size_t headers_end = path_with_query.find('\r\n\r\n');
+    if (headers_end == std::string::npos) {
+        // it should return true cause if request has no body so we don't care about it
+        return true;
+    }
+
+    // extract body
+    size_t body_start = headers_end + 4; // skip CRLF
+    if (body_start < raw_request.size()) { // it has a body
+        if (out_body) {
+            out_body = raw_request.data() + body_start;
+        }
+    }
+
+    return true;
 }
 
-void shutdown_server(const int signal) {
-    if (signal == SIGINT) {
-        closeSignal = true;
-        backendLog("Closing server", INFO);
+std::string url_decode(const std::string& encoded_string) {
+    std::string decoded_string;
+    decoded_string.reserve(encoded_string.length());
+
+    for (size_t i = 0; i < encoded_string.length(); ++i) {
+        if (encoded_string[i] == '%' && i + 2 < encoded_string.length()) {
+            char hex1 = encoded_string[i + 1];
+            char hex2 = encoded_string[i + 2];
+            int hex_value = 0;
+
+            if (hex1 >= '0' && hex1 <= '9') hex_value += (hex1 - '0') * 16;
+            else if (hex1 >= 'A' && hex1 <= 'F') hex_value += (hex1 - 'A' + 10) * 16;
+            else if (hex1 >= 'a' && hex1 <= 'f') hex_value += (hex1 - 'a' + 10) * 16;
+            else { decoded_string += encoded_string[i]; continue; }
+
+            if (hex2 >= '0' && hex2 <= '9') hex_value += (hex2 - '0');
+            else if (hex2 >= 'A' && hex2 <= 'F') hex_value += (hex2 - 'A' + 10);
+            else if (hex2 >= 'a' && hex2 <= 'f') hex_value += (hex2 - 'a' + 10);
+            else { decoded_string += encoded_string[i]; continue; }
+
+            decoded_string += static_cast<char>(hex_value);
+            i += 2;
+        } else if (encoded_string[i] == '+') {
+            decoded_string += ' ';
+        } else {
+            decoded_string += encoded_string[i];
+        }
     }
+    backendLog(decoded_string, INFO);
+    return decoded_string;
 }
