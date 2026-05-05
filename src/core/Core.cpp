@@ -129,8 +129,7 @@ void HTTPServer::Loop(const Router* router) const {
         if (const auto route = router->find_route(request.raw_url, request.method, request.path_parameters)) {
 
             backendLog("Route found: " + route->original_path, INFO);
-            const sol::function function = Lua::GetFunction(route->handlerScript);
-            if (function != sol::nil) {
+            if (const sol::function function = Lua::GetFunction(route->handlerScript); function != sol::nil) {
                 const sol::protected_function& pf = function;
                 sol::protected_function_result result = pf(request);
                 if (!result.valid()) {
